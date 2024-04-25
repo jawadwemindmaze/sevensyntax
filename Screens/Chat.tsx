@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, TextInput, Button, FlatList, Text, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, TextInput, Button, FlatList, Text, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { v4 as uuidv4 } from 'uuid';
+import io from 'socket.io-client';
+const socket = io('http://localhost:3000');
 
 function Chat({ route, navigation }) {
     const { channelId, userId, otherUserId } = route.params;
@@ -11,6 +13,21 @@ function Chat({ route, navigation }) {
     useEffect(() => {
         loadMessages();
     }, []);
+
+    useEffect(() => {
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            socket.emit('joinRoom', channelId);
+        });
+
+        socket.on('receiveMessage', (msg) => {
+            if (msg.channelId === channelId) {
+                if (userId !== msg.senderId) {
+                    setMessages((prevMessages) => [...prevMessages, msg]);
+                }
+            }
+        });
+    }, [socket, channelId]);
 
     const loadMessages = async () => {
         const storedMessages = await AsyncStorage.getItem(`messages_${channelId}`);
@@ -30,9 +47,29 @@ function Chat({ route, navigation }) {
 
         const updatedMessages = [...messages, newMessage];
         await AsyncStorage.setItem(`messages_${channelId}`, JSON.stringify(updatedMessages));
+        socket.emit('sendMessage', newMessage);
         setMessages(updatedMessages);
         setMessage('');
     };
+
+    const deleteMessage = async (id) => {
+        const filteredMessages = messages.filter(msg => msg.id !== id);
+        await AsyncStorage.setItem(`messages_${channelId}`, JSON.stringify(filteredMessages));
+        setMessages(filteredMessages);
+    };
+
+    const handleLongPress = (id) => {
+        Alert.alert(
+            'Delete Message',
+            'Are you sure you want to delete this message?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', onPress: () => deleteMessage(id), style: 'destructive' },
+            ],
+            { cancelable: true }
+        );
+    };
+
 
     return (
         <KeyboardAvoidingView
@@ -43,9 +80,10 @@ function Chat({ route, navigation }) {
                 data={messages}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
-                    <View style={[styles.messageContainer, item.senderId === userId ? styles.sender : styles.receiver]}>
+                    <TouchableOpacity style={[styles.messageContainer, item.senderId === userId ? styles.sender : styles.receiver]}
+                        onLongPress={() => handleLongPress(item.id)}>
                         <Text>{item.message}</Text>
-                    </View>
+                    </TouchableOpacity>
                 )}
             />
             <View style={styles.inputContainer}>
